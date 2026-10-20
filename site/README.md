@@ -4,7 +4,11 @@
 
 ## Vercel 部署
 
-将本仓库导入 Vercel，Root Directory 设为 `site`，Framework Preset 选择 `Other`，无需 Build Command，Output Directory 使用 `.`。无需环境变量和额外依赖。`main` 的后续提交会触发官网部署。实际生产地址以 Vercel 的 Domains 页面及根 README 为准。
+生产官网：[w3f7-campus-link-cdut.vercel.app](https://w3f7-campus-link-cdut.vercel.app/)。Vercel 项目名为 `w3f7.campus_link.cdut`；免费访问域名不接受点号或下划线，已按维护者确认使用连字符。原自动网址 `w3f7campuslinkcdut.vercel.app` 也保持可用。
+
+本次通过 Vercel Drop to Deploy 上传 9 个公开静态文件：`index.html`、`styles.css`、`app.js`、`assets/` 三个资源和 `vendor/` 三个资源。未上传 `.openai`、客户端代码、测试报告、真实账号或环境文件。Vercel 显示两个域名均为 Valid Configuration / Production。
+
+当前未连接 Git 提供方，GitHub 提交不会自动部署。后续若连接本仓库，Root Directory 设为 `site`，Framework Preset 选择 `Other`，无需 Build Command，Output Directory 使用 `.`；部署内容仍应仅包含上述公开静态文件。无需环境变量和额外依赖。
 
 ## 打开与预览
 

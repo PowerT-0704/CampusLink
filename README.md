@@ -15,7 +15,7 @@
 [![构建状态](https://github.com/PowerT-0704/CampusLink/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/PowerT-0704/CampusLink/actions/workflows/release.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/PowerT-0704/CampusLink?style=flat-square&color=e9b44c)](https://github.com/PowerT-0704/CampusLink/stargazers)
 
-[**📥 下载 v1.4.2**](https://github.com/PowerT-0704/CampusLink/releases/tag/v1.4.2) · [**🌐 官网源码**](site/index.html) · [**📖 专版使用指南**](docs/usage.md) · [**💬 上游问题反馈**](https://github.com/65658dsf/CampusLink/issues)
+[**📥 下载 v1.4.2**](https://github.com/PowerT-0704/CampusLink/releases/tag/v1.4.2) · [**🌐 项目官网**](https://w3f7-campus-link-cdut.vercel.app/) · [**📖 专版使用指南**](docs/usage.md) · [**💬 上游问题反馈**](https://github.com/65658dsf/CampusLink/issues)
 
 开发者：**[PowerT-0704](https://github.com/PowerT-0704)**
 
@@ -69,7 +69,7 @@
 
 ## 🌐 项目官网
 
-独立静态官网位于 [`site/`](site/README.md)，以 v1.4.2 为内容基准。下载项目后直接打开 `site/index.html`，或在项目根目录运行：
+访问 [Vercel 项目官网](https://w3f7-campus-link-cdut.vercel.app/)。独立静态官网源码位于 [`site/`](site/README.md)，以 v1.4.2 为内容基准。本次通过静态文件部署，后续 GitHub 提交尚不会自动更新线上站点；连接 Git 提供方后可开启自动部署。下载项目后直接打开 `site/index.html`，或在项目根目录运行：
 
 ```powershell
 node site/preview.cjs
