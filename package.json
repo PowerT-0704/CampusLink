@@ -1,11 +1,11 @@
 {
   "name": "campus-link-liquid",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "type": "module",
   "description": "岚连 · CDUTYB 专版（液态玻璃版）—— 面向成都理工大学（宜宾校区）的校园网连接工具（基于 Campus Link）",
   "author": "岚连 · CDUTYB 专版（液态玻璃版）（基于 NingMeng123 的 Campus Link）",
-  "homepage": "https://github.com/65658dsf/CampusLink",
+  "homepage": "https://github.com/PowerT-0704/CampusLink",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "node scripts/dev.cjs",

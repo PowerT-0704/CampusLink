@@ -16,6 +16,16 @@ export const projectIntro = '岚连 Campus Link 是面向 Windows / macOS 的校
 
 export const journalEntries: JournalEntry[] = [
   {
+    version: '1.4.2', scope: 'derived', date: '2026-10-20', title: '加密凭据与稳定恢复',
+    items: [
+      '记住密码改用系统加密，保存前验证可解密；主进程缓存可用凭据，重启自动恢复，无需每次输入。',
+      '兼容旧明文与旧加密凭据迁移；系统暂不可读取时保留密文和自动连接偏好，支持重试恢复。',
+      '配置写入成功后再更新内存、会话与守护状态；保存失败保持原状态，自启动设置失败展示实际状态。',
+      '首次引导可选择记住密码、仅本次使用或跳过；完善弹窗键盘操作、焦点恢复及更新提示排队。',
+      '同步应用版本、安装包、README 与官网说明；保留认证协议、地址发现和自动重试规则。',
+    ],
+  },
+  {
     version: '1.4.1', scope: 'derived', date: '2026-10-17', title: '项目仓库入口与更新体验',
     items: [
       '开发日志新增「本项目仓库」入口，可直接打开 GitHub 项目主页（PowerT-0704/CampusLink）。',

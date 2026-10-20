@@ -39,11 +39,16 @@ const http = require('node:http');
     settings: { profileId: startupProfile.id, username: '', parameters: { operator: 'campus' }, rememberPassword: false, autoLaunch: false, autoConnect: false, minimizeToTray: true },
     profiles: [startupProfile], credential: null,
   }));
-  // 首次启动引导：空数据目录 → 欢迎弹窗 → 保存账号密码与检测间隔。
+  // Isolate onboarding and all startup reads to the same local mock portal.
   const welcomeDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-link-welcome-'));
+  fs.writeFileSync(path.join(welcomeDirectory, 'settings.json'), JSON.stringify({ version: 1,
+    settings: { profileId: startupProfile.id, username: '', parameters: { operator: 'campus' }, rememberPassword: false, autoLaunch: false, autoConnect: false, minimizeToTray: true },
+    profiles: [startupProfile], credential: null, onboardingComplete: false,
+  }));
   const welcomeEnv = { ...process.env, CAMPUS_LINK_DATA_DIR: welcomeDirectory };
   delete welcomeEnv.ELECTRON_RUN_AS_NODE;
   delete welcomeEnv.VITE_DEV_SERVER_URL;
+  delete welcomeEnv.CAMPUS_LINK_LEGACY_DATA_DIR;
   fs.mkdirSync(path.join(root, 'artifacts'), { recursive: true });
   const welcomeApp = await electron.launch({ args: [root], cwd: root, env: welcomeEnv });
   try {
@@ -53,25 +58,19 @@ const http = require('node:http');
     assert.equal((await welcomePage.evaluate(() => window.campus.getSnapshot())).app.firstRun, true);
     await welcomeDialog.getByLabel('校园网账号', { exact: true }).fill('welcome-account');
     await welcomeDialog.getByLabel('登录密码', { exact: true }).fill('welcome-secret');
+    await expect(welcomeDialog.getByRole('checkbox', { name: /记住密码/ })).not.toBeChecked();
+    await welcomeDialog.getByRole('checkbox', { name: /记住密码/ }).check();
     await welcomeDialog.getByLabel('断连检测间隔（秒）', { exact: true }).fill('10');
     await welcomePage.screenshot({ path: path.join(root, 'artifacts/welcome-dialog.png') });
     await welcomePage.getByRole('button', { name: '保存并开始', exact: true }).click();
-    let welcomeSaved = null;
-    try {
-      await welcomeDialog.waitFor({ state: 'hidden', timeout: 15000 });
-      welcomeSaved = JSON.parse(fs.readFileSync(path.join(welcomeDirectory, 'settings.json'), 'utf8'));
-    } catch {
-      // 本机已经通过校园网认证时，引导会按设计拒绝切换账号；此时只验证引导本身。
-      await welcomePage.getByRole('button', { name: '稍后再说', exact: true }).click();
-      await expect(welcomeDialog).not.toBeVisible();
-    }
-    if (welcomeSaved) {
-      assert.equal(welcomeSaved.settings.username, 'welcome-account');
-      assert.equal(welcomeSaved.settings.reconnectIntervalSeconds, 10);
-      assert.equal(welcomeSaved.credential.password, 'welcome-secret');
-    }
+    await expect(welcomeDialog).not.toBeVisible();
+    const welcomeSaved = JSON.parse(fs.readFileSync(path.join(welcomeDirectory, 'settings.json'), 'utf8'));
+    assert.equal(welcomeSaved.settings.username, 'welcome-account');
+    assert.equal(welcomeSaved.settings.reconnectIntervalSeconds, 10);
+    assert.equal(welcomeSaved.credential.password, undefined);
+    assert.equal(await welcomeApp.evaluate(({ safeStorage }, encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')), welcomeSaved.credential.encrypted), 'welcome-secret');
     const fresh = await welcomePage.evaluate(() => window.campus.getSnapshot());
-    assert.equal(fresh.settings.profileId, 'builtin-cdut-yibin-ruijie');
+    assert.equal(fresh.settings.profileId, startupProfile.id);
     await welcomePage.getByRole('button', { name: '连接方案', exact: false }).first().click();
     const search = welcomePage.getByRole('searchbox', { name: '搜索连接方案' });
     await search.fill('四川');
@@ -83,6 +82,7 @@ const http = require('node:http');
   const env = { ...process.env, CAMPUS_LINK_DATA_DIR: dataDirectory };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.VITE_DEV_SERVER_URL;
+  delete env.CAMPUS_LINK_LEGACY_DATA_DIR;
   const app = await electron.launch({ args: [root], cwd: root, env });
   try {
     const page = await app.firstWindow();
@@ -137,7 +137,7 @@ const http = require('node:http');
     await page.getByRole('button', { name: '关闭提示' }).click();
     await page.getByRole('button', { name: '开发日志', exact: true }).click();
     await expect(page.getByRole('heading', { name: '版本记录' })).toBeVisible();
-    await expect(page.locator('.journal-entry').first()).toContainText('v1.4.1');
+    await expect(page.locator('.journal-entry').first()).toContainText(`v${require('../package.json').version}`);
     await expect(page.getByText(/NingMeng123/).first()).toBeVisible();
     await expect(page.getByRole('button', { name: '打开上游仓库', exact: true })).toBeVisible();
     await page.getByRole('button', { name: '连接概览', exact: true }).click();
@@ -220,7 +220,8 @@ const http = require('node:http');
     assert.equal(online, true);
     assert.equal(new URLSearchParams(requests.find(item => item.path === '/api/login').body).get('password'), 'local-smoke-secret');
     const savedLogin = JSON.parse(fs.readFileSync(path.join(dataDirectory, 'settings.json'), 'utf8'));
-    assert.equal(savedLogin.credential.password, 'local-smoke-secret');
+    assert.equal(savedLogin.credential.password, undefined);
+    assert.equal(await app.evaluate(({ safeStorage }, encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')), savedLogin.credential.encrypted), 'local-smoke-secret');
     assert.equal(JSON.stringify(savedLogin.settings).includes('local-smoke-secret'), false, '设置字段不会包含密码');
     await page.getByRole('switch', { name: '启动后自动连接', exact: true }).click();
     await expect(page.getByRole('switch', { name: '启动后自动连接', exact: true })).toBeChecked();
@@ -271,7 +272,8 @@ const http = require('node:http');
     await expect.poll(async () => (await page.evaluate(() => window.campus.getSnapshot())).settings.username).toBe('managed-account');
     assert.equal((await page.evaluate(() => window.campus.getSnapshot())).hasPassword, true);
     const savedManaged = JSON.parse(fs.readFileSync(path.join(dataDirectory, 'settings.json'), 'utf8'));
-    assert.equal(savedManaged.credential.password, 'managed-secret');
+    assert.equal(savedManaged.credential.password, undefined);
+    assert.equal(await app.evaluate(({ safeStorage }, encrypted) => safeStorage.decryptString(Buffer.from(encrypted, 'base64')), savedManaged.credential.encrypted), 'managed-secret');
     await page.getByRole('switch', { name: '启动后自动连接', exact: true }).click();
     await expect(page.getByRole('switch', { name: '启动后自动连接', exact: true })).toBeChecked();
     await page.getByRole('button', { name: '连接概览', exact: true }).click();
@@ -286,7 +288,7 @@ const http = require('node:http');
     assert.equal(managedConnected.hasPassword, true, '连接不会清除密码管理保存的凭据');
     assert.equal(new URLSearchParams(requests.filter(item => item.path === '/api/login').at(-1).body).get('password'), 'managed-secret', '连接使用新保存的密码，而非旧的未提交输入');
     const managedAfterConnect = JSON.parse(fs.readFileSync(path.join(dataDirectory, 'settings.json'), 'utf8'));
-    assert.equal(managedAfterConnect.credential.password, 'managed-secret');
+    assert.equal(managedAfterConnect.credential.encrypted, savedManaged.credential.encrypted);
     assert.equal(JSON.stringify(managedAfterConnect.settings).includes('managed-secret'), false);
     await page.getByRole('button', { name: '注销校园网', exact: true }).click();
     await expect(page.getByRole('button', { name: '连接校园网', exact: true })).toBeVisible();
@@ -393,6 +395,6 @@ const http = require('node:http');
     // 点击关闭后窗口会立即退出，Playwright 可能在该点击结算前收到上下文关闭，属预期行为。
     await page.getByRole('button', { name: '关闭窗口', exact: true }).click().catch(() => {});
     await closed;
-    console.log(`Desktop smoke passed: renderer bridge, navigation, profile search and folded built-ins, first-run welcome guide, validation, startup guards, per-profile JSON import/export, local mock authentication, configurable outage reconnection, manual logout pause, response details and redaction, update prompt and Releases navigation, ${nativeClipboardAvailable ? 'native clipboard' : 'clipboard bridge payload (host clipboard unavailable)'}, plaintext credential policy with password manager, sticky titlebar, responsive layout, and exit.`);
+    console.log(`Desktop smoke passed: renderer bridge, navigation, profile search and folded built-ins, first-run welcome guide, validation, startup guards, per-profile JSON import/export, local mock authentication, configurable outage reconnection, manual logout pause, response details and redaction, update prompt and Releases navigation, ${nativeClipboardAvailable ? 'native clipboard' : 'clipboard bridge payload (host clipboard unavailable)'}, OS-encrypted credentials with password manager, sticky titlebar, responsive layout, and exit.`);
   } finally { await app.close().catch(() => {}); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exit(1); });

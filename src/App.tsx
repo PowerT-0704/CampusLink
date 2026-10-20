@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, Clock3, Copy, EthernetPort, ExternalLink, Eye, EyeOff, FileJson2, GraduationCap, LayoutDashboard, LoaderCircle, LockKeyhole, Minus, Monitor, MoreHorizontal, Network, Power, Puzzle, Radio, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, Terminal, Trash2, Upload, Wifi, X, FileText, KeyRound, Search, Palette } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { api, isPreview } from './api';
 import type { LogEntry, Profile, Settings, Snapshot, UpdateState } from './types';
 import { journalEntries, maintainer, projectIntro, upstreamRepo, upstreamSite, forkRepo } from './journal';
@@ -42,6 +43,21 @@ function AppearanceSlider({ value, disabled, onChange }: { value: 'classic' | 'l
 
 function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; label: string }) {
   return <button className={`toggle ${checked ? 'on' : ''}`} type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}><span /></button>;
+}
+
+function Modal({ titleId, children, onClose, small = false, busy = false, error }: { titleId: string; children: ReactNode; onClose: () => void; small?: boolean; busy?: boolean; error?: string }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog?.showModal();
+    return () => { dialog?.close(); if (previousFocus?.isConnected) previousFocus.focus(); };
+  }, []);
+  return <dialog ref={dialogRef} className={`modal ${small ? 'small-modal' : ''}`} aria-modal="true" aria-labelledby={titleId} aria-busy={busy} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }} onClick={event => {
+    if (busy || event.target !== event.currentTarget) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) onClose();
+  }}>{children}{error && <p className="modal-feedback" role="alert">{error}</p>}</dialog>;
 }
 
 function SignalArtwork({ connected }: { connected: boolean }) {
@@ -153,10 +169,12 @@ export default function App() {
   const [manageUsername, setManageUsername] = useState('');
   const [managePassword, setManagePassword] = useState('');
   const [manageShowPassword, setManageShowPassword] = useState(false);
+  const [manageRemember, setManageRemember] = useState(true);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [welcomeUsername, setWelcomeUsername] = useState('');
   const [welcomePassword, setWelcomePassword] = useState('');
   const [welcomeShowPassword, setWelcomeShowPassword] = useState(false);
+  const [welcomeRemember, setWelcomeRemember] = useState(false);
   const [welcomeInterval, setWelcomeInterval] = useState('10');
   const [showArchived, setShowArchived] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState | null>(null);
@@ -194,10 +212,10 @@ export default function App() {
     return () => { active = false; unsubscribe(); };
   }, []);
   useEffect(() => {
-    if (!snapshot || inspectedLog || help || removeId || releaseDialog || updateState?.status !== 'available' || !updateState.latestVersion || announcedVersions.current.has(updateState.latestVersion)) return;
+    if (!snapshot || welcomeOpen || manageOpen || inspectedLog || help || removeId || releaseDialog || updateState?.status !== 'available' || !updateState.latestVersion || announcedVersions.current.has(updateState.latestVersion)) return;
     announcedVersions.current.add(updateState.latestVersion);
     setReleaseDialog(updateState);
-  }, [snapshot, updateState, inspectedLog, help, removeId, releaseDialog]);
+  }, [snapshot, updateState, inspectedLog, help, removeId, releaseDialog, welcomeOpen, manageOpen]);
   useEffect(() => {
     if (snapshot) { setReconnectInterval(String(snapshot.settings.reconnectIntervalSeconds)); setIntervalError(''); }
   }, [snapshot?.settings.reconnectIntervalSeconds]);
@@ -230,7 +248,8 @@ export default function App() {
   }
   async function updateSettings(patch: Partial<Settings>) {
     const result = await action(() => api.saveSettings(patch));
-    if (result) setSnapshot(result);
+    if (result) { setSnapshot(result); setRemember(result.settings.rememberPassword); }
+    else if (patch.rememberPassword !== undefined && snapshot) setRemember(snapshot.settings.rememberPassword);
   }
   async function changeAppearance(value: 'classic' | 'liquid') {
     const result = await action(() => api.setAppearance(value));
@@ -246,33 +265,37 @@ export default function App() {
     setManageUsername(snapshot?.settings.username ?? '');
     setManagePassword('');
     setManageShowPassword(false);
+    setManageRemember(Boolean(snapshot?.settings.rememberPassword || snapshot?.app.secureStorage));
+    setToast(null);
     setManageOpen(true);
+  }
+  function closeManager() {
+    if (busy) return;
+    setManageOpen(false); setManagePassword(''); setManageShowPassword(false);
+  }
+  async function closeWelcome() {
+    if (busy) return;
+    const result = await action(() => api.completeOnboarding({ skip: true }));
+    if (result) { setSnapshot(result); setWelcomeOpen(false); setWelcomePassword(''); setWelcomeShowPassword(false); }
+  }
+  async function retrySavedCredentials() {
+    const result = await action(() => api.retryCredentials(), '密码已恢复可用，可继续自动连接。');
+    if (result) { setSnapshot(result); setRemember(result.settings.rememberPassword); }
   }
   async function saveManagedCredentials() {
     if (!snapshot?.profiles.some(item => item.id === profileId)) { setTab('profiles'); setManageOpen(false); return; }
     if (!manageUsername.trim()) { setToast({ message: '请填写校园网账号。', error: true }); return; }
     if (!managePassword) { setToast({ message: '请填写校园网密码。', error: true }); return; }
-    const result = await action(() => api.saveCredentials({ username: manageUsername.trim(), password: managePassword }));
-    if (result) { setSnapshot(result); setUsername(result.settings.username); setRemember(result.settings.rememberPassword); setPassword(''); setManageOpen(false); setManagePassword(''); setToast({ message: '账号密码已以明文保存在本机。', error: false }); }
+    const result = await action(() => api.saveCredentials({ username: manageUsername.trim(), password: managePassword, rememberPassword: manageRemember }));
+    if (result) { setSnapshot(result); setUsername(result.settings.username); setRemember(result.settings.rememberPassword); setPassword(''); setManageOpen(false); setManagePassword(''); setManageShowPassword(false); setToast({ message: result.credentialStatus.storage === 'encrypted' ? '密码已由系统加密保存，重启后仍可使用。' : '密码仅在本次运行中使用。', error: false }); }
   }
   async function saveWelcome() {
     const seconds = Number(welcomeInterval.trim());
     if (!welcomeUsername.trim()) { setToast({ message: '请填写校园网账号。', error: true }); return; }
     if (!welcomePassword) { setToast({ message: '请填写校园网密码。', error: true }); return; }
     if (!/^\d+$/.test(welcomeInterval.trim()) || !Number.isInteger(seconds) || seconds < 5 || seconds > 3600) { setToast({ message: '断连检测间隔请输入 5–3600 之间的整数秒数。', error: true }); return; }
-    const result = await action(async () => {
-      await api.saveCredentials({ username: welcomeUsername.trim(), password: welcomePassword });
-      // 启动时的状态检查可能仍在进行：仅针对"忙碌"做有界重试，避免引导保存被拦截。
-      for (let attempt = 0; ; attempt++) {
-        try { return await api.saveSettings({ reconnectIntervalSeconds: seconds }); }
-        catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          if (attempt >= 9 || !message.includes('正在处理网络请求')) throw error;
-          await new Promise(resolve => setTimeout(resolve, 400));
-        }
-      }
-    }, '已保存，欢迎使用岚连。');
-    if (result) { setSnapshot(result); setWelcomeOpen(false); setWelcomePassword(''); }
+    const result = await action(() => api.completeOnboarding({ username: welcomeUsername.trim(), password: welcomePassword, rememberPassword: welcomeRemember, reconnectIntervalSeconds: seconds }), '设置已保存，欢迎使用岚连。');
+    if (result) { setSnapshot(result); setUsername(result.settings.username); setRemember(result.settings.rememberPassword); setWelcomeOpen(false); setWelcomePassword(''); setWelcomeShowPassword(false); }
   }
 
   async function saveReconnectInterval() {
@@ -298,9 +321,9 @@ export default function App() {
     if (busy || !snapshot || snapshot.connection.canDisconnect || ['checking', 'connecting', 'connected', 'disconnecting'].includes(snapshot.connection.status)) return;
     if (!snapshot.profiles.some(item => item.id === profileId)) { setTab('profiles'); setToast({ message: '请先选择适合学校的连接方案。', error: true }); return; }
     if (!username.trim()) { setToast({ message: '请先填写校园网账号。', error: true }); return; }
-    if (!password && !(snapshot?.hasPassword && username === snapshot.settings.username && profileId === snapshot.settings.profileId)) { setToast({ message: '请填写校园网密码。', error: true }); return; }
+    if (!password && !(snapshot.credentialStatus.available && username === snapshot.settings.username && profileId === snapshot.settings.profileId)) { setToast({ message: snapshot.credentialStatus.needsRetry ? '请先重试读取已保存密码。' : '请填写校园网密码。', error: true }); return; }
     const result = await action(() => api.connect({ profileId, username: username.trim(), password, rememberPassword: remember, parameters }));
-    if (result) { setSnapshot(result); if (result.hasPassword) setPassword(''); }
+    if (result) { setSnapshot(result); setRemember(result.settings.rememberPassword); setPassword(''); }
   }
   async function importProfile() {
     const result = await action(() => api.importProfile());
@@ -332,6 +355,7 @@ export default function App() {
   const visibleProfiles = snapshot.profiles.filter(item => (!item.archived || Boolean(searchQuery)) && (!searchQuery || [item.name, item.description, item.author, item.protocol, protocolLabel(item.protocol)].some(value => value.toLocaleLowerCase().includes(searchQuery))));
   const archivedProfiles = snapshot.profiles.filter(item => item.archived);
   const renderProfileCard = (item: Profile) => (<article className={`card profile-card ${item.id === profileId ? 'selected' : ''}`} key={item.id}><div className="profile-card-header"><span className="profile-emblem"><GraduationCap size={26} /></span><span className={`badge ${item.builtin ? 'subtle' : 'neutral'}`}>{item.builtin ? '应用内置' : '外部导入'}</span></div><h2>{item.name}</h2><p className="profile-description">{item.description}</p><dl className="profile-details"><div><dt>认证协议</dt><dd>{protocolLabel(item.protocol)}</dd></div><div><dt>方案版本</dt><dd>v{item.version}</dd></div><div><dt>认证入口</dt><dd title={item.portalDiscovery?.url ?? item.homepage}>{item.portalDiscovery ? '自动发现' : item.homepage}</dd></div>{item.portalDiscovery && <><div><dt>发现地址</dt><dd title={item.portalDiscovery.url}>{item.portalDiscovery.url}</dd></div><div><dt>备用认证页</dt><dd title={item.homepage}>{item.homepage}</dd></div></>}</dl><div className="profile-actions"><button className={`button small ${item.id === profileId ? 'selected-button' : 'secondary'}`} disabled={inProgress || canDisconnect || item.id === profileId} onClick={() => void selectProfile(item.id)}>{item.id === profileId ? <><CheckCheck size={16} />当前使用</> : '使用此方案'}</button><div className="profile-tools"><button type="button" className="button secondary small profile-export" title={`导出${item.name}方案 JSON`} aria-label={`导出${item.name}方案 JSON`} disabled={busy} onClick={() => void exportProfile(item.id)}><ArrowDownToLine size={14} />导出 JSON</button><button className="icon-button" title="打开认证页" aria-label={`打开${item.name}认证页`} disabled={inProgress || !profile} onClick={() => void action(() => api.openPortal(item.id))}><ExternalLink size={17} /></button>{!item.builtin && <button className="icon-button danger-icon" disabled={inProgress || canDisconnect} title="删除方案" aria-label={`删除${item.name}方案`} onClick={() => setRemoveId(item.id)}><Trash2 size={17} /></button>}</div></div></article>);
+  const credentialSummary = snapshot.credentialStatus.message || (snapshot.credentialStatus.storage === 'encrypted' ? '密码已由系统加密保存，重启后可继续使用。' : snapshot.credentialStatus.storage === 'session' ? '密码仅在本次运行中使用；勾选记住密码后可在重启后继续使用。' : '尚未保存密码。选择记住密码后，由系统加密保存。');
   const state = snapshot.connection.status;
   const connected = state === 'connected';
   const detectedPortalOrigin = portalOrigin(snapshot.connection.portalUrl);
@@ -400,11 +424,12 @@ export default function App() {
               <div className="card-heading"><div className="section-title"><span className="icon-tile"><GraduationCap size={20} /></span><div><h2>连接校园网</h2><p>选择学校，输入你的认证信息</p></div></div><span className="step-label">01 / CONNECT</span></div>
               <form onSubmit={event => { event.preventDefault(); void connect(); }}>
                 <label className="field-label" htmlFor="profile">连接方案</label><div className="select-wrapper school-select"><GraduationCap size={18} /><select id="profile" value={profileId} disabled={inProgress || canDisconnect} onChange={event => void selectProfile(event.target.value)}><option value="" disabled>请先选择连接方案</option>{snapshot.profiles.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown size={16} /></div>
-                <div className="input-row"><div><label className="field-label" htmlFor="username">校园网账号</label><input id="username" name="username" autoComplete="username" value={username} disabled={inProgress || canDisconnect} onChange={event => setUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={256} /></div><div><label className="field-label" htmlFor="password">登录密码</label><div className="password-input"><input id="password" name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} disabled={inProgress || canDisconnect} onChange={event => setPassword(event.target.value)} placeholder={snapshot.hasPassword && username === snapshot.settings.username ? '已保存，留空使用' : '请输入校园网密码'} maxLength={256} /><button type="button" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div></div>
-                {(profile?.fields ?? []).length > 0 && <div className="profile-fields">{profile?.fields?.map(field => <div key={field.key}><label className="field-label" htmlFor={`param-${field.key}`}>{field.label}</label>{field.options ? <div className="select-wrapper"><select id={`param-${field.key}`} value={parameters[field.key] ?? field.default ?? ''} disabled={inProgress || canDisconnect} onChange={event => setParameters({ ...parameters, [field.key]: event.target.value })}>{field.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={15} /></div> : <input id={`param-${field.key}`} value={parameters[field.key] ?? field.default ?? ''} disabled={inProgress || canDisconnect} onChange={event => setParameters({ ...parameters, [field.key]: event.target.value })} placeholder={field.placeholder} maxLength={256} />}</div>)}</div>}
+                <div className="input-row"><div><label className="field-label" htmlFor="username">校园网账号</label><input id="username" name="username" autoComplete="username" value={username} disabled={inProgress || canDisconnect} onChange={event => setUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={200} /></div><div><label className="field-label" htmlFor="password">登录密码</label><div className="password-input"><input id="password" name="password" type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} disabled={inProgress || canDisconnect} onChange={event => setPassword(event.target.value)} placeholder={snapshot.credentialStatus.needsRetry && !snapshot.credentialStatus.available ? '已保存，等待重新读取' : snapshot.credentialStatus.available && username === snapshot.settings.username ? '密码可用，留空使用' : '请输入校园网密码'} maxLength={1024} /><button type="button" aria-label={showPassword ? '隐藏密码' : '显示密码'} onClick={() => setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div></div>
+                {(profile?.fields ?? []).length > 0 && <div className="profile-fields">{profile?.fields?.map(field => <div key={field.key}><label className="field-label" htmlFor={`param-${field.key}`}>{field.label}</label>{field.options ? <div className="select-wrapper"><select id={`param-${field.key}`} value={parameters[field.key] ?? field.default ?? ''} disabled={inProgress || canDisconnect} onChange={event => setParameters({ ...parameters, [field.key]: event.target.value })}>{field.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select><ChevronDown size={15} /></div> : <input id={`param-${field.key}`} value={parameters[field.key] ?? field.default ?? ''} disabled={inProgress || canDisconnect} onChange={event => setParameters({ ...parameters, [field.key]: event.target.value })} placeholder={field.placeholder} maxLength={200} />}</div>)}</div>}
                 <div className="form-options"><label className="checkbox-label"><input type="checkbox" checked={remember} disabled={inProgress || canDisconnect} onChange={event => { const checked = event.target.checked; setRemember(checked); if (!checked && snapshot.settings.rememberPassword) void updateSettings({ rememberPassword: false, autoConnect: false }); }} />记住密码<LockKeyhole size={12} /></label><button type="button" className="text-button" disabled={inProgress || !profile} onClick={() => void action(() => api.openPortal(profileId))}>打开认证页<ExternalLink size={12} /></button></div>
                 <button type="submit" className="button primary connect-button" disabled={inProgress}>{inProgress ? <LoaderCircle size={18} className="spin" /> : <Wifi size={19} />}{state === 'connecting' ? '正在连接…' : '连接校园网'}<ArrowRight size={17} /></button>
-                <div className="form-footnote"><ShieldCheck size={13} />{isPreview ? '桌面客户端支持本地保存账号密码' : '密码明文保存在本机设置文件，便于自动连接'}</div>
+                <div className="form-footnote"><ShieldCheck size={13} />{isPreview ? '桌面客户端支持本地保存账号密码' : credentialSummary}</div>
+                {snapshot.credentialStatus.needsRetry && <button type="button" className="button secondary small credential-retry" disabled={busy} onClick={() => void retrySavedCredentials()}><RefreshCw size={14} />{snapshot.credentialStatus.storage === 'encrypted' ? '重试读取已保存密码' : '加密保存本次密码'}</button>}
               </form>
               </>}
             </section>
@@ -463,7 +488,7 @@ export default function App() {
               <div className="interval-editor"><div className="interval-controls"><input id="reconnect-interval" type="number" inputMode="numeric" min={5} max={3600} step={1} value={reconnectInterval} disabled={inProgress} aria-invalid={Boolean(intervalError)} aria-describedby={intervalError ? 'reconnect-interval-help reconnect-interval-error' : 'reconnect-interval-help'} onChange={event => { setReconnectInterval(event.target.value); setIntervalError(''); }} /><button className="button secondary small" type="submit" disabled={inProgress || reconnectInterval === String(snapshot.settings.reconnectIntervalSeconds)}>保存间隔</button></div>{intervalError && <p className="field-error" id="reconnect-interval-error" role="alert">{intervalError}</p>}</div>
             </form>
             <div className={`guard-status ${guardActive ? 'active' : guardPaused ? 'paused' : ''}`}><ShieldCheck size={16} /><p>{guardSummary}<span>手动注销或托盘暂停都会停止守护；再次连接成功或“恢复守护”后继续。服务器暂不可达时不会把状态未知当作断线。</span></p></div>
-          </section><section className="card settings-card"><div className="card-heading"><div className="section-title"><span className="icon-tile"><LockKeyhole size={20} /></span><div><h2>账号与隐私</h2><p>凭据由你掌控</p></div></div><span className="badge neutral">明文存储</span></div><div className="settings-row"><div><strong>本地保存的密码</strong><p>{snapshot.hasPassword ? `已明文保存在本机（便于自动连接）${snapshot.settings.username ? `：${snapshot.settings.username}` : ''}。清除后，自动连接也会关闭。` : '暂未保存密码：可在连接页勾选「记住密码」，或点击「管理账号密码」直接设置。'}</p></div><div style={{ display: 'flex', gap: 8, flexShrink: 0 }}><button className="button primary small" disabled={busy} onClick={openManager}><KeyRound size={14} />管理账号密码</button><button className="button secondary small" disabled={inProgress || !snapshot.hasPassword} onClick={() => void action(async () => { const value = await api.clearCredentials(); setSnapshot(value); setPassword(''); setRemember(false); }, '本地密码已清除，自动连接已关闭。')}><Trash2 size={14} />清除密码</button></div></div></section>
+          </section><section className="card settings-card"><div className="card-heading"><div className="section-title"><span className="icon-tile"><LockKeyhole size={20} /></span><div><h2>账号与隐私</h2><p>凭据由你掌控</p></div></div><span className="badge neutral">{snapshot.credentialStatus.storage === 'encrypted' ? '系统加密' : snapshot.credentialStatus.storage === 'session' ? '仅本次运行' : '未保存'}</span></div><div className="settings-row"><div><strong>本地保存的密码</strong><p>{credentialSummary}</p></div><div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>{(snapshot.credentialStatus.needsRetry || (snapshot.credentialStatus.storage === 'session' && snapshot.app.secureStorage)) && <button className="button secondary small" disabled={busy} onClick={() => void retrySavedCredentials()}><RefreshCw size={14} />{snapshot.credentialStatus.storage === 'encrypted' ? '重试读取已保存密码' : '加密保存本次密码'}</button>}<button className="button primary small" disabled={busy} onClick={openManager}><KeyRound size={14} />管理账号密码</button><button className="button secondary small" disabled={inProgress || (!snapshot.credentialStatus.available && !snapshot.credentialStatus.needsRetry)} onClick={() => void action(async () => { const value = await api.clearCredentials(); setSnapshot(value); setPassword(''); setRemember(false); }, '本地密码已清除，自动连接已关闭。')}><Trash2 size={14} />清除密码</button></div></div></section>
           <section className="card settings-card update-card" aria-labelledby="update-card-title">
             <div className="card-heading"><div className="section-title"><span className="icon-tile"><ArrowDownToLine size={20} /></span><div><h2 id="update-card-title">软件更新</h2><p>获取新功能与修复，保持岚连常新</p></div></div><span className={`badge ${updateState?.status === 'available' ? 'subtle' : 'neutral'}`} role="status">{checkingUpdate ? '正在检查' : updateLabels[updateState?.status ?? 'idle']}</span></div>
             <div className="settings-row update-check-row"><div><strong>当前版本 v{snapshot.app.version}</strong><p>{isPreview ? '更新检查请使用桌面客户端。' : '应用启动时自动检查正式版本，也可以手动检查。'}</p>{updateState?.checkedAt && dateTimeLabel(updateState.checkedAt) && <p className="update-checked-at">上次检查：<time dateTime={updateState.checkedAt}>{dateTimeLabel(updateState.checkedAt)}</time></p>}</div><button type="button" className="button secondary small" disabled={checkingUpdate || updateState?.status === 'checking'} onClick={() => void checkForUpdates()}><RefreshCw size={14} className={checkingUpdate || updateState?.status === 'checking' ? 'spin' : ''} />{checkingUpdate || updateState?.status === 'checking' ? '正在检查…' : '检查更新'}</button></div>
@@ -479,9 +504,9 @@ export default function App() {
     {toast && <div className={`toast ${toast.error ? 'error' : ''}`} role="alert">{toast.error ? <CircleHelp size={19} /> : <Check size={19} />}<span>{toast.message}</span><button aria-label="关闭提示" onClick={() => setToast(null)}><X size={16} /></button></div>}
     {releaseDialog && <UpdateDialog release={releaseDialog} onClose={() => setReleaseDialog(null)} />}
     {inspectedLog && <ResponseDialog entry={inspectedLog} onClose={() => setInspectedLog(null)} />}
-    {help && <div className="modal-backdrop" onClick={() => setHelp(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={event => event.stopPropagation()}><button className="modal-close icon-button" aria-label="关闭帮助" onClick={() => setHelp(false)}><X size={19} /></button><span className="icon-tile large"><Wifi size={27} /></span><h2 id="help-title">三步，回到校园在线生活</h2><div className="help-step"><b>1</b><div><strong>接入学校网络</strong><p>先在系统中连接校园 Wi-Fi 或插入校园网网线。本工具负责校园网认证。</p></div></div><div className="help-step"><b>2</b><div><strong>选择方案并填写账号</strong><p>首次启动先前往连接方案选择学校，再填写认证账号密码。已配置方案后，启动时会检查校园网登录状态。</p></div></div><div className="help-step"><b>3</b><div><strong>连接，或按需自动连接</strong><p>点击连接完成认证。勾选记住密码后可开启启动自动连接；开机自启动需要安装桌面版本。</p></div></div><div className="help-note"><Network size={18} /><p>连接失败时查看活动日志。账号欠费、设备限制等问题请通过学校认证页或校园网服务渠道处理。</p></div><button className="button primary" onClick={() => setHelp(false)}>开始使用<ArrowRight size={16} /></button></section></div>}
-    {removeId && <div className="modal-backdrop"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="remove-title"><h2 id="remove-title">移除这个连接方案？</h2><p>配置将从本机移除，之后可以重新导入。</p><div className="modal-actions"><button className="button secondary" onClick={() => setRemoveId(null)}>取消</button><button className="button danger" disabled={busy} onClick={() => void action(async () => { const value = await api.removeProfile(removeId); setSnapshot(value); setProfileId(value.settings.profileId); setParameters(value.settings.parameters); setUsername(value.settings.username); setRemember(value.settings.rememberPassword); setPassword(''); setRemoveId(null); }, '连接方案已移除。')}>确认移除</button></div></section></div>}
-    {welcomeOpen && <div className="modal-backdrop"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><h2 id="welcome-title">欢迎使用 · 岚连</h2><p>第一次使用，先完成基础设置：保存账号密码并选择断连检测间隔。密码以明文保存在本机设置文件中，日志与诊断导出不会包含密码。</p><div style={{ display: 'grid', gap: 14, marginTop: 16 }}><div><label className="field-label" htmlFor="welcome-username">校园网账号</label><input id="welcome-username" name="welcome-username" autoComplete="username" value={welcomeUsername} onChange={event => setWelcomeUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={256} /></div><div><label className="field-label" htmlFor="welcome-password">登录密码</label><div className="password-input"><input id="welcome-password" name="welcome-password" type={welcomeShowPassword ? 'text' : 'password'} autoComplete="off" value={welcomePassword} onChange={event => setWelcomePassword(event.target.value)} placeholder="请输入校园网密码" maxLength={1024} /><button type="button" aria-label={welcomeShowPassword ? '隐藏密码' : '显示密码'} onClick={() => setWelcomeShowPassword(!welcomeShowPassword)}>{welcomeShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div><div><label className="field-label" htmlFor="welcome-interval">断连检测间隔（秒）</label><input id="welcome-interval" name="welcome-interval" type="number" inputMode="numeric" min={5} max={3600} step={1} value={welcomeInterval} onChange={event => setWelcomeInterval(event.target.value)} placeholder="默认 10 秒" /></div></div><div className="modal-actions"><button className="button secondary" onClick={() => setWelcomeOpen(false)}>稍后再说</button><button className="button primary" disabled={busy} onClick={() => void saveWelcome()}><Check size={15} />保存并开始</button></div></section></div>}
-    {manageOpen && <div className="modal-backdrop" onClick={() => setManageOpen(false)}><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="manage-title" onClick={event => event.stopPropagation()}><button className="modal-close icon-button" aria-label="关闭密码管理" onClick={() => setManageOpen(false)}><X size={19} /></button><h2 id="manage-title">管理账号与密码</h2><p>保存后用于自动连接与断线重连。密码以明文保存在本机设置文件中，日志与诊断导出不会包含密码。</p><div style={{ display: 'grid', gap: 14, marginTop: 16 }}><div><label className="field-label" htmlFor="manage-username">校园网账号</label><input id="manage-username" name="manage-username" autoComplete="username" value={manageUsername} onChange={event => setManageUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={256} /></div><div><label className="field-label" htmlFor="manage-password">登录密码</label><div className="password-input"><input id="manage-password" name="manage-password" type={manageShowPassword ? 'text' : 'password'} autoComplete="off" value={managePassword} onChange={event => setManagePassword(event.target.value)} placeholder={snapshot.hasPassword ? '已有保存，输入新密码将覆盖' : '请输入校园网密码'} maxLength={1024} /><button type="button" aria-label={manageShowPassword ? '隐藏密码' : '显示密码'} onClick={() => setManageShowPassword(!manageShowPassword)}>{manageShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div></div><div className="modal-actions"><button className="button secondary" onClick={() => setManageOpen(false)}>取消</button><button className="button primary" disabled={busy} onClick={() => void saveManagedCredentials()}><KeyRound size={15} />保存账号密码</button></div></section></div>}
+    {help && <Modal titleId="help-title" onClose={() => setHelp(false)} busy={busy}><button className="modal-close icon-button" aria-label="关闭帮助" onClick={() => setHelp(false)}><X size={19} /></button><span className="icon-tile large"><Wifi size={27} /></span><h2 id="help-title">三步，回到校园在线生活</h2><div className="help-step"><b>1</b><div><strong>接入学校网络</strong><p>先在系统中连接校园 Wi-Fi 或插入校园网网线。本工具负责校园网认证。</p></div></div><div className="help-step"><b>2</b><div><strong>选择方案并填写账号</strong><p>首次启动先前往连接方案选择学校，再填写认证账号密码。已配置方案后，启动时会检查校园网登录状态。</p></div></div><div className="help-step"><b>3</b><div><strong>连接，或按需自动连接</strong><p>点击连接完成认证。勾选记住密码后可开启启动自动连接；开机自启动需要安装桌面版本。</p></div></div><div className="help-note"><Network size={18} /><p>连接失败时查看活动日志。账号欠费、设备限制等问题请通过学校认证页或校园网服务渠道处理。</p></div><button className="button primary" onClick={() => setHelp(false)}>开始使用<ArrowRight size={16} /></button></Modal>}
+    {removeId && <Modal titleId="remove-title" onClose={() => setRemoveId(null)} small busy={busy} error={toast?.error ? toast.message : undefined}><h2 id="remove-title">移除这个连接方案？</h2><p>配置将从本机移除，之后可以重新导入。</p><div className="modal-actions"><button className="button secondary" onClick={() => setRemoveId(null)}>取消</button><button className="button danger" disabled={busy} onClick={() => void action(async () => { const value = await api.removeProfile(removeId); setSnapshot(value); setProfileId(value.settings.profileId); setParameters(value.settings.parameters); setUsername(value.settings.username); setRemember(value.settings.rememberPassword); setPassword(''); setRemoveId(null); }, '连接方案已移除。')}>确认移除</button></div></Modal>}
+    {welcomeOpen && <Modal titleId="welcome-title" onClose={() => { void closeWelcome(); }} small busy={busy} error={toast?.error ? toast.message : undefined}><h2 id="welcome-title">欢迎使用 · 岚连</h2><p>设置账号与检测间隔。勾选记住密码后由系统加密保存，重启后仍可使用；不勾选则仅在本次运行中使用，也可跳过后再设置。</p><div style={{ display: 'grid', gap: 14, marginTop: 16 }}><div><label className="field-label" htmlFor="welcome-username">校园网账号</label><input id="welcome-username" name="welcome-username" autoComplete="username" value={welcomeUsername} onChange={event => setWelcomeUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={200} /></div><div><label className="field-label" htmlFor="welcome-password">登录密码</label><div className="password-input"><input id="welcome-password" name="welcome-password" type={welcomeShowPassword ? 'text' : 'password'} autoComplete="off" value={welcomePassword} onChange={event => setWelcomePassword(event.target.value)} placeholder="请输入校园网密码" maxLength={1024} /><button type="button" aria-label={welcomeShowPassword ? '隐藏密码' : '显示密码'} onClick={() => setWelcomeShowPassword(!welcomeShowPassword)}>{welcomeShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div><label className="checkbox-label credential-choice"><input type="checkbox" checked={welcomeRemember} disabled={busy || !snapshot.app.secureStorage} onChange={event => setWelcomeRemember(event.target.checked)} />记住密码（系统加密，重启后可用）</label>{!snapshot.app.secureStorage && <p className="credential-note">系统加密暂不可用，本次可正常连接；恢复后可在密码管理中保存。</p>}<div><label className="field-label" htmlFor="welcome-interval">断连检测间隔（秒）</label><input id="welcome-interval" name="welcome-interval" type="number" inputMode="numeric" min={5} max={3600} step={1} value={welcomeInterval} onChange={event => setWelcomeInterval(event.target.value)} placeholder="默认 10 秒" /></div></div><div className="modal-actions"><button className="button secondary" disabled={busy} onClick={() => void closeWelcome()}>稍后再说</button><button className="button primary" disabled={busy} onClick={() => void saveWelcome()}><Check size={15} />保存并开始</button></div></Modal>}
+    {manageOpen && <Modal titleId="manage-title" onClose={closeManager} small busy={busy} error={toast?.error ? toast.message : undefined}><button className="modal-close icon-button" aria-label="关闭密码管理" disabled={busy} onClick={closeManager}><X size={19} /></button><h2 id="manage-title">管理账号与密码</h2><p>{credentialSummary}</p><div style={{ display: 'grid', gap: 14, marginTop: 16 }}><div><label className="field-label" htmlFor="manage-username">校园网账号</label><input id="manage-username" name="manage-username" autoComplete="username" value={manageUsername} onChange={event => setManageUsername(event.target.value)} placeholder="请输入学号 / 认证账号" maxLength={200} /></div><div><label className="field-label" htmlFor="manage-password">登录密码</label><div className="password-input"><input id="manage-password" name="manage-password" type={manageShowPassword ? 'text' : 'password'} autoComplete="off" value={managePassword} onChange={event => setManagePassword(event.target.value)} placeholder={snapshot.hasPassword ? '已有保存，输入新密码将覆盖' : '请输入校园网密码'} maxLength={1024} /><button type="button" aria-label={manageShowPassword ? '隐藏密码' : '显示密码'} onClick={() => setManageShowPassword(!manageShowPassword)}>{manageShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div><label className="checkbox-label credential-choice"><input type="checkbox" checked={manageRemember} disabled={busy || !snapshot.app.secureStorage} onChange={event => setManageRemember(event.target.checked)} />记住密码（系统加密，重启后可用）</label></div><div className="modal-actions"><button className="button secondary" disabled={busy} onClick={closeManager}>取消</button><button className="button primary" disabled={busy} onClick={() => void saveManagedCredentials()}><KeyRound size={15} />保存账号密码</button></div></Modal>}
   </div>;
 }

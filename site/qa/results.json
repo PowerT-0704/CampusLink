@@ -1,0 +1,113 @@
+{
+  "timestamp": "2026-10-20T12:31:55.023Z",
+  "results": [
+    "1440x900: layout, images, keyboard focus, appearance switch passed",
+    "1280x800: layout, images, keyboard focus, appearance switch passed",
+    "768x1024: layout, images, keyboard focus, appearance switch passed",
+    "390x844: layout, images, keyboard focus, appearance switch passed",
+    "360x800: layout, images, keyboard focus, appearance switch passed",
+    "prefers-reduced-motion: static content, no scroll triggers, instant appearance switch passed",
+    "file:// with JavaScript enabled: content, image and download links passed",
+    "file:// with JavaScript disabled: content, image and download links passed",
+    "Animation library unavailable: static content and native appearance controls passed"
+  ],
+  "errors": [],
+  "runtime": {
+    "idle": {
+      "seconds": 3.01,
+      "rendererMainThreadPercent": 2.61,
+      "jsHeapMiB": 2.13
+    },
+    "scroll": {
+      "seconds": 3.26,
+      "rendererMainThreadPercent": 9.44,
+      "jsHeapMiB": 2.82
+    },
+    "pointer": {
+      "seconds": 3.28,
+      "rendererMainThreadPercent": 8.35,
+      "jsHeapMiB": 4.34
+    }
+  },
+  "contrast": {
+    "minimumBody": 4.58,
+    "failures": []
+  },
+  "footprint": {
+    "components": [
+      {
+        "name": "gsap.min.js",
+        "version": "3.15.0",
+        "bytes": 72927,
+        "gzipBytes": 28420
+      },
+      {
+        "name": "ScrollTrigger.min.js",
+        "version": "3.15.0",
+        "bytes": 44575,
+        "gzipBytes": 18003
+      }
+    ],
+    "productionBytes": 265322,
+    "productionGzipBytes": 160807,
+    "directoryBytes": 4423101
+  },
+  "browser": "155.0.4283.62",
+  "firstLoad": {
+    "htmlBytes": 16567,
+    "resourceBytes": 194838,
+    "transferBytesWithHeaders": 213805,
+    "resources": [
+      "/styles.css",
+      "/vendor/gsap.min.js",
+      "/vendor/ScrollTrigger.min.js",
+      "/assets/campuslink-liquid.webp",
+      "/assets/icon.svg",
+      "/app.js",
+      "/assets/icon.svg"
+    ],
+    "externalRequests": 0
+  },
+  "network": [
+    {
+      "name": "/styles.css",
+      "bytes": 21998,
+      "transferBytes": 22298
+    },
+    {
+      "name": "/vendor/gsap.min.js",
+      "bytes": 72927,
+      "transferBytes": 73227
+    },
+    {
+      "name": "/vendor/ScrollTrigger.min.js",
+      "bytes": 44575,
+      "transferBytes": 44875
+    },
+    {
+      "name": "/assets/campuslink-liquid.webp",
+      "bytes": 48128,
+      "transferBytes": 48428
+    },
+    {
+      "name": "/assets/icon.svg",
+      "bytes": 389,
+      "transferBytes": 689
+    },
+    {
+      "name": "/app.js",
+      "bytes": 6432,
+      "transferBytes": 6732
+    },
+    {
+      "name": "/assets/icon.svg",
+      "bytes": 389,
+      "transferBytes": 689
+    },
+    {
+      "name": "/assets/campuslink-classic.webp",
+      "bytes": 53724,
+      "transferBytes": 54024
+    }
+  ]
+}

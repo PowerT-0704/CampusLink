@@ -143,12 +143,14 @@ function serviceFixture(t, operation = async () => ({ online: true, message: '�
   if (selectProfile) service.saveSettings({ profileId: builtinDrcomProfile.id });
   return service;
 }
-test('remembered password follows the plaintext policy but never leaks into snapshots or logs', async t => {
+test('remembered password is encrypted and never leaks into snapshots or logs', async t => {
   const service = serviceFixture(t);
   const password = 'DoNotExpose-密码-7391';
   await service.connect({ username: 'student', password, rememberPassword: true });
   const saved = JSON.parse(fs.readFileSync(service.file, 'utf8'));
-  assert.equal(saved.credential.password, password);
+  assert.equal(saved.credential.password, undefined);
+  assert.equal(service.safeStorage.decryptString(Buffer.from(saved.credential.encrypted, 'base64')), password);
+  assert.equal(JSON.stringify(service.snapshot()).includes(saved.credential.encrypted), false);
   assert.equal(JSON.stringify(service.snapshot()).includes(password), false);
   assert.equal(service.snapshot().hasPassword, true);
   assert.equal(service.decryptPassword(), password);
@@ -174,6 +176,7 @@ test('fresh installation selects the CDUTYB profile and can check status immedia
 test('an empty saved selection falls back to the default campus on reload', async t => {
   const service = serviceFixture(t, async () => { throw new Error('No request expected'); }, { selectProfile: false });
   service.saveSettings({ minimizeToTray: false });
+  service.completeOnboarding({ skip: true });
   const restored = new CampusService({ directory: service.directory, safeStorage: service.safeStorage, operation: service.operation });
   t.after(() => restored.dispose());
   assert.equal(restored.settings.profileId, 'builtin-cdut-yibin-ruijie');
@@ -198,7 +201,7 @@ test('an unavailable saved profile falls back to the default campus and preserve
   assert.equal(restored.settings.autoConnect, false);
   assert.equal(restored.externalProfiles[0].id, example.id);
 });
-test('plaintext saved credentials are accepted and reused for automatic login', async t => {
+test('plaintext saved credentials migrate to encryption and remain usable for automatic login', async t => {
   const calls = [];
   const service = serviceFixture(t);
   const data = JSON.parse(fs.readFileSync(service.file));
@@ -210,10 +213,13 @@ test('plaintext saved credentials are accepted and reused for automatic login', 
   assert.equal(restored.snapshot().hasPassword, true);
   assert.equal(restored.decryptPassword(), 'insecure-password');
   assert.equal(restored.settings.autoConnect, true);
+  const migrated = JSON.parse(fs.readFileSync(service.file, 'utf8'));
+  assert.equal(migrated.credential.password, undefined);
+  assert.equal(service.safeStorage.decryptString(Buffer.from(migrated.credential.encrypted, 'base64')), 'insecure-password');
   await restored.initialize();
   assert.deepEqual(calls, ['status', 'login']);
 });
-test('the plaintext password manager survives reload without system encryption', t => {
+test('the encrypted password manager survives reload and unavailable encryption uses memory only', t => {
   const service = serviceFixture(t);
   service.setCredentials({ username: 'saved-account', password: 'saved-secret' });
   service.saveSettings({ autoConnect: true });
@@ -225,7 +231,11 @@ test('the plaintext password manager survives reload without system encryption',
   assert.equal(restored.settings.autoConnect, true);
   const unsafe = serviceFixture(t, undefined, { safeStorage: { isEncryptionAvailable: () => false } });
   const snapshot = unsafe.setCredentials({ username: 'saved-account', password: 'saved-secret' });
-  assert.equal(snapshot.hasPassword, true);
+  assert.equal(snapshot.hasPassword, false);
+  assert.equal(snapshot.credentialStatus.available, true);
+  assert.equal(snapshot.credentialStatus.storage, 'session');
+  assert.equal(snapshot.settings.rememberPassword, false);
+  assert.equal(JSON.parse(fs.readFileSync(unsafe.file, 'utf8')).credential, null);
   assert.equal(unsafe.decryptPassword(), 'saved-secret');
 });
 test('unremembered passwords and server error details never persist', async t => {
@@ -248,14 +258,15 @@ test('changing account removes old credentials and disables automatic connection
   assert.equal(service.snapshot().settings.autoConnect, false);
   await assert.rejects(service.connect({}), /密码/);
 });
-test('password manager stores plaintext credentials, enables automatic connection and validates input', async t => {
+test('password manager encrypts credentials, enables automatic connection and validates input', async t => {
   const service = serviceFixture(t);
   const snapshot = service.setCredentials({ username: 'manager-account', password: 'manager-secret' });
   assert.equal(snapshot.hasPassword, true);
   assert.equal(snapshot.settings.username, 'manager-account');
   assert.equal(snapshot.settings.rememberPassword, true);
   const saved = JSON.parse(fs.readFileSync(service.file, 'utf8'));
-  assert.equal(saved.credential.password, 'manager-secret');
+  assert.equal(saved.credential.password, undefined);
+  assert.equal(service.safeStorage.decryptString(Buffer.from(saved.credential.encrypted, 'base64')), 'manager-secret');
   assert.equal(JSON.stringify(service.snapshot()).includes('manager-secret'), false);
   assert.equal(service.decryptPassword(), 'manager-secret');
   service.saveSettings({ autoConnect: true });
@@ -271,22 +282,23 @@ test('password manager stores plaintext credentials, enables automatic connectio
   assert.equal(service.decryptPassword(), 'other-secret');
   await service.disconnect();
 });
-test('unreadable encrypted credentials disable automatic login and can be securely replaced', async t => {
+test('unreadable encrypted credentials preserve the startup preference and can be securely replaced', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-link-legacy-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const settings = { profileId: 'builtin-cdut-yibin-ruijie', username: 'legacy-account', rememberPassword: true, autoLaunch: false, autoConnect: true, autoReconnect: true, reconnectIntervalSeconds: 10, minimizeToTray: true, parameters: {} };
   fs.writeFileSync(path.join(directory, 'settings.json'), JSON.stringify({ version: 1, settings, profiles: [], credential: { profileId: settings.profileId, username: settings.username, encrypted: 'AAAA' } }));
   const storage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => { if (value.toString('base64') === 'AAAA') throw new Error('cannot decrypt'); return value.toString(); } };
   const service = new CampusService({ directory, safeStorage: storage, operation: async () => ({ online: true, message: 'ok' }) });
-  assert.equal(service.snapshot().hasPassword, true);
+  assert.equal(service.snapshot().hasPassword, false);
+  assert.equal(service.snapshot().credentialStatus.needsRetry, true);
   assert.equal(service.decryptPassword(), '');
-  assert.equal(service.settings.autoConnect, false);
+  assert.equal(service.settings.autoConnect, true);
   assert.throws(() => service.saveSettings({ autoConnect: true }), /密码管理/);
   const snapshot = service.setCredentials({ username: 'legacy-account', password: 'fresh-secret' });
   assert.equal(snapshot.hasPassword, true);
   assert.equal(service.decryptPassword(), 'fresh-secret');
 });
-test('first run flag tracks whether the settings file existed at startup', t => {
+test('first run flag persists completion rather than merely creating a settings file', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'campus-link-firstrun-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const storage = { isEncryptionAvailable: () => true, encryptString: value => Buffer.from([...value].reverse().join('')), decryptString: value => [...value.toString()].reverse().join('') };
@@ -294,6 +306,7 @@ test('first run flag tracks whether the settings file existed at startup', t => 
   assert.equal(first.snapshot().app.firstRun, true);
   first.saveSettings({ profileId: builtinDrcomProfile.id });
   first.setCredentials({ username: 'first-run-account', password: 'first-run-secret' });
+  first.completeOnboarding({ skip: true });
   const second = new CampusService({ directory, safeStorage: storage, operation: async () => ({ online: true, message: 'ok' }) });
   assert.equal(second.snapshot().app.firstRun, false);
 });
@@ -337,7 +350,7 @@ test('automatic authentication checks status and skips login when already online
   await service.autoConnectIfEnabled();
   assert.deepEqual(calls, ['status']);
 });
-test('concurrent network actions are blocked while the plaintext password manager stays available', async t => {
+test('concurrent network actions are blocked while the encrypted password manager stays available', async t => {
   let resolve;
   const service = serviceFixture(t, () => new Promise(done => { resolve = done; }));
   const pending = service.connect({ username: 'student', password: 'pw', rememberPassword: true });
@@ -347,6 +360,7 @@ test('concurrent network actions are blocked while the plaintext password manage
   const snapshot = service.setCredentials({ username: 'student', password: 'replacement' });
   assert.equal(snapshot.hasPassword, true);
   resolve({ online: true, message: 'ok' }); await pending;
+  assert.equal(service.session.password, 'replacement');
   service.clearCredentials();
   assert.equal(service.snapshot().hasPassword, false);
   assert.equal(service.session.password, undefined);
@@ -366,10 +380,11 @@ test('import supports portable declarative profiles and protects built-in and du
 test('saving credentials works without system encryption and startup registration errors propagate', async t => {
   const service = serviceFixture(t, undefined, { safeStorage: { isEncryptionAvailable: () => false }, autoLaunch: () => { throw new Error('开发预览不注册开机自启动'); } });
   service.saveSettings({ rememberPassword: true });
-  assert.equal(service.snapshot().settings.rememberPassword, true);
+  assert.equal(service.snapshot().settings.rememberPassword, false);
   assert.equal(service.snapshot().hasPassword, false);
   const snapshot = service.setCredentials({ username: 'student', password: 'secret' });
-  assert.equal(snapshot.hasPassword, true);
+  assert.equal(snapshot.hasPassword, false);
+  assert.equal(snapshot.credentialStatus.available, true);
   assert.equal(service.decryptPassword(), 'secret');
   await service.connect({ username: 'student', password: 'secret', rememberPassword: true });
   assert.equal(service.connection.status, 'connected');

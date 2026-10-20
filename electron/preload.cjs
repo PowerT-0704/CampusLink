@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('campus', Object.freeze({
   saveSettings: invoke('saveSettings'),
   setAppearance: invoke('setAppearance'),
   saveCredentials: invoke('saveCredentials'),
+  completeOnboarding: invoke('completeOnboarding'),
+  retryCredentials: invoke('retryCredentials'),
   connect: invoke('connect'),
   disconnect: invoke('disconnect'),
   checkStatus: invoke('checkStatus'),

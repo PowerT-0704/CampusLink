@@ -10,11 +10,22 @@ const { MAX_PROFILE_BYTES, safeUrl, parseProfile, exportProfile, exportProfileJs
 const { UpdateChecker, safeReleaseUrl } = require('./updates.cjs');
 const { buildDiagnosticsReport } = require('./diagnostics-export.cjs');
 const { createNetworkWatcher } = require('./network-watch.cjs');
+const { migrateLegacyData } = require('./legacy-data.cjs');
 
 app.setName('岚连 · CDUTYB 专版（液态玻璃版）');
 app.setAppUserModelId('cn.campuslink.glass');
 if (!app.isPackaged && process.env.CAMPUS_LINK_DATA_DIR) app.setPath('userData', path.resolve(process.env.CAMPUS_LINK_DATA_DIR));
 const isPrimary = app.requestSingleInstanceLock();
+let legacyMigrationFailed = false;
+if (isPrimary) {
+  const isolatedDevelopment = !app.isPackaged && process.env.CAMPUS_LINK_DATA_DIR;
+  const isolatedLegacy = isolatedDevelopment && process.env.CAMPUS_LINK_LEGACY_DATA_DIR;
+  if (!isolatedDevelopment || isolatedLegacy) {
+    try {
+      migrateLegacyData({ sourceDirectory: isolatedLegacy || path.join(app.getPath('appData'), '岚连 · Campus Link'), targetDirectory: app.getPath('userData') });
+    } catch { legacyMigrationFailed = true; }
+  }
+}
 let win = null;
 let tray = null;
 let service = null;
@@ -86,6 +97,11 @@ function registerIpc() {
     return service.publish();
   });
   handle('saveCredentials', input => service.setCredentials(input));
+  handle('completeOnboarding', input => service.completeOnboarding(input));
+  handle('retryCredentials', async () => {
+    const snapshot = service.retryCredentials();
+    return service.busy ? snapshot : service.autoConnectIfEnabled();
+  });
   handle('connect', input => service.connect(input));
   handle('disconnect', () => service.disconnect());
   handle('checkStatus', () => service.checkStatus());
@@ -236,7 +252,7 @@ function updateTray(snapshot) {
     { type: 'separator' },
     { label: '查询认证状态', enabled: !busy && Boolean(snapshot.settings.profileId), click: () => trayAction(() => service.checkStatus()) },
     { label: snapshot.connection.reconnectPaused ? '恢复守护' : '暂停守护', enabled: snapshot.connection.reconnectPaused || (snapshot.settings.autoReconnect && connected), click: () => trayAction(() => service.setGuardPaused(!service.reconnectPaused)) },
-    { label: '连接校园网', enabled: !busy && Boolean(snapshot.settings.profileId) && !snapshot.connection.canDisconnect && snapshot.hasPassword, click: () => trayAction(() => service.connect({})) },
+    { label: '连接校园网', enabled: !busy && Boolean(snapshot.settings.profileId) && !snapshot.connection.canDisconnect && snapshot.credentialStatus.available, click: () => trayAction(() => service.connect({})) },
     { label: '断开认证', enabled: !busy && snapshot.connection.canDisconnect, click: () => trayAction(() => service.disconnect()) },
     { type: 'separator' },
     { label: '退出岚连 · CDUTYB 专版', click: () => { quitting = true; app.quit(); } },
@@ -287,19 +303,11 @@ else {
   app.whenReady().then(() => {
     updates = new UpdateChecker({ currentVersion: app.getVersion() });
     updates.on('change', state => { if (win && !win.isDestroyed()) win.webContents.send('campus:update', state); });
-    // 产品改名后 userData 目录会变化：首次启动时把旧目录的 settings.json 迁移过来，
-    // 保留账号、方案与偏好；旧目录保留不删，便于回滚。
     const settingsFile = path.join(app.getPath('userData'), 'settings.json');
     const freshInstall = !fs.existsSync(settingsFile);
-    try {
-      const legacyFile = path.join(app.getPath('appData'), '岚连 · Campus Link', 'settings.json');
-      if (freshInstall && fs.existsSync(legacyFile)) {
-        fs.mkdirSync(app.getPath('userData'), { recursive: true });
-        fs.copyFileSync(legacyFile, settingsFile);
-      }
-    } catch { /* 迁移失败不阻止启动；应用会以默认设置运行 */ }
     service = new CampusService({
       directory: app.getPath('userData'), safeStorage, version: app.getVersion(), packaged: app.isPackaged, firstRun: freshInstall,
+      readAutoLaunch: () => app.isPackaged && app.getLoginItemSettings(process.platform === 'win32' ? { path: process.execPath, args: ['--autostart'] } : {}).openAtLogin,
       autoLaunch: enabled => {
         if (!['win32', 'darwin'].includes(process.platform)) throw new Error('开机自启动支持 Windows 和 macOS。');
         if (!app.isPackaged) throw new Error('开发预览不注册开机自启动，请安装正式版后设置。');
@@ -310,6 +318,7 @@ else {
         return actual;
       },
     });
+    if (legacyMigrationFailed) service.log('warning', '旧版数据迁移未完成，原目录和凭据均已保留；未覆盖现有系统加密上下文，请在完成迁移前保留旧版应用。', false);
     if (app.isPackaged && ['win32', 'darwin'].includes(process.platform)) service.settings.autoLaunch = app.getLoginItemSettings(process.platform === 'win32' ? { path: process.execPath, args: ['--autostart'] } : {}).openAtLogin;
     if (process.platform === 'darwin') Menu.setApplicationMenu(Menu.buildFromTemplate([
       { role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' },
