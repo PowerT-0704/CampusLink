@@ -15,7 +15,7 @@
 [![构建状态](https://github.com/PowerT-0704/CampusLink/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/PowerT-0704/CampusLink/actions/workflows/release.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/PowerT-0704/CampusLink?style=flat-square&color=e9b44c)](https://github.com/PowerT-0704/CampusLink/stargazers)
 
-[**📥 下载 v1.4.2**](https://github.com/PowerT-0704/CampusLink/releases/tag/v1.4.2) · [**🌐 项目官网**](https://w3f7-campus-link-cdut.vercel.app/) · [**📖 专版使用指南**](docs/usage.md) · [**💬 上游问题反馈**](https://github.com/65658dsf/CampusLink/issues)
+[**📥 下载 v1.4.2**](https://github.com/PowerT-0704/CampusLink/releases/tag/v1.4.2) · [**🌐 项目官网**](https://w3f7-campus-link-cdut.vercel.app/) · [**📖 专版使用指南**](docs/usage.md) · [**💬 上游问题反馈**](https://github.com/65658dsf/CampusLink/issues) · [**百度网盘🌐 直链**](https://pan.baidu.com/s/1dmoMOwaPIfFuN6KqfQs-FA?pwd=kmem)
 
 开发者：**[PowerT-0704](https://github.com/PowerT-0704)**
 
